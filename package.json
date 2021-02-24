@@ -1,6 +1,6 @@
 {
   "name": "shiv",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "client for shiv-server",
   "main": "index.js",
   "scripts": {
@@ -8,8 +8,12 @@
     "dev": "nodemon --inspect index.js",
     "start": "node index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/monteslu/shiv.git"
+  },
   "keywords": [],
-  "author": "",
+  "author": "Luis Montes",
   "license": "ISC",
   "dependencies": {
     "mqtt": "^4.2.6"
