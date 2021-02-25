@@ -3,7 +3,7 @@ const net = require('net');
 const EventEmitter = require('events').EventEmitter;
 
 
-async function createConnection(config) {
+function createConnection(config) {
   const events = new EventEmitter();
 
   const {
@@ -98,7 +98,8 @@ async function createConnection(config) {
     } else if (name === 'msg') {
       if (action === 'json') {
         try {
-          const msg = JSON.parse(data.toString());
+          const msg = JSON.parse(message.toString());
+          msg.from = socketId;
           events.emit('json', msg);
         } catch (e) {
           console.log('error parsing json message');
@@ -129,10 +130,38 @@ async function createConnection(config) {
     } else {
       return;
     }
-    mqClient.publish(`msg/${host}/0/json`, json);
+    mqClient.publish(`msg/${host}/${username}/json`, json);
+  }
+
+  function endSockets() {
+    const sockKeys = Object.keys(sockets);
+    sockKeys.forEach((sk) => {
+      try {
+        sockets[sk].end();
+        delete sockets[sk];
+      }
+      catch(e) {
+        console.log('error closing socket', e);
+      }
+    });
+  }
+
+  function endClient(force, callback) {
+    if (force) {
+      mqClient.end(force);
+      endSockets();
+      return;
+    }
+    mqClient.end(force, (a, b) => {
+      endSockets();
+      if (callback) {
+        callback(a, b);
+      }
+    })
   }
   
   events.sendJson = sendJson;
+  events.endClient = endClient;
 
   return events;
 
@@ -141,5 +170,3 @@ async function createConnection(config) {
 module.exports = {
   createConnection,
 };
-
-

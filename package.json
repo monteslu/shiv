@@ -1,6 +1,6 @@
 {
   "name": "shiv",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "client for shiv-server",
   "main": "index.js",
   "scripts": {

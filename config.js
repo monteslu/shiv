@@ -1,5 +1,5 @@
 const baseConfig = {
-  SHIV_SERVER: process.env.SHIV_SERVER || 'ws://localhost:3001',
+  SHIV_SERVER: process.env.SHIV_SERVER || 'ws://localhost:3101',
   SHIV_SECRET: process.env.SHIV_SECRET, // keep it secret, keep it safe!
   LOCAL_HOST: process.env.LOCAL_HOST || 'localhost', // host of local server
   PORT: process.env.PORT || 3000, // port of local server
@@ -31,6 +31,5 @@ keys.forEach((k) => {
 })
 
 const config = Object.assign({}, baseConfig, {connections});
-console.log('config', config);
 
 module.exports = config;
