@@ -1,8 +1,11 @@
 const mqtt = require('mqtt');
 const net = require('net');
+const EventEmitter = require('events').EventEmitter;
 
 
 async function createConnection(config) {
+  const events = new EventEmitter();
+
   const {
     SHIV_SERVER,
     SHIV_SECRET,
@@ -18,11 +21,13 @@ async function createConnection(config) {
 
   const connectURL = `${SHIV_SERVER}${SHIV_SERVER.endsWith('/') ? '' : '/'}${SHIV_BASE}${SHIV_PATH}`;
 
-  console.log('connecting to', connectURL, ' …' );
+  console.log('connecting to', connectURL, '…' );
 
   const username = (new URL(connectURL)).hostname;
 
   const mqClient  = mqtt.connect(connectURL, { password: SHIV_SECRET, username, keepalive: SHIV_KEEP_ALIVE });
+
+  events.mqClient = mqClient;
 
   const sockets = {};
 
@@ -30,6 +35,7 @@ async function createConnection(config) {
     const now = Date.now();
     console.log('connected to', username, lastConnect ? (now - lastConnect) : '', lastConnect ? 'since last connect' : '');
     lastConnect = now;
+    events.emit('connected', config);
   });
 
   mqClient.on('error', (error) => {
@@ -37,11 +43,13 @@ async function createConnection(config) {
   });
 
   mqClient.on('message', (topic, message) => {
+    if (!topic) {
+      return;
+    }
     // message is Buffer
+    const [name, hostName, socketId, action] = topic.split('/');
     console.log('\n↓ MQTT' , topic);
-
-    if (topic?.startsWith('web/')) {
-      const [name, hostName, socketId, action] = topic.split('/');
+    if (name === 'web') {
       if (socketId) {
         let socket = sockets[socketId];
         if (action === 'close') {
@@ -57,9 +65,7 @@ async function createConnection(config) {
           sockets[socketId] = socket;
           socket.connect(PORT, LOCAL_HOST, () => {
             console.log(`\nCONNECTED TO ${LOCAL_HOST}:${PORT}`, socket.socketId);
-            // console.log('\nWRITING:');
             console.log('← ' + message.slice(0, 200).toString().split('\r\n')[0], message.length);
-            //console.log(message.toString());
             socket.write(message);
           });
           socket.on('data', (data) => {
@@ -89,9 +95,46 @@ async function createConnection(config) {
         socket.write(message);
       }
       
+    } else if (name === 'msg') {
+      if (action === 'json') {
+        try {
+          const msg = JSON.parse(data.toString());
+          events.emit('json', msg);
+        } catch (e) {
+          console.log('error parsing json message');
+        }
+      }
     }
+
   });
 
+  function sendJson(host, json) {
+    if (!host || !json) {
+      return;
+    }
+
+    if (host === username) {
+      console.log('cannot send message to self', host);
+    }
+
+    if (typeof json === 'object') {
+      json = JSON.stringify(json);
+    } else if (typeof json === 'string') {
+      try {
+        json = JSON.stringify(JSON.parse(json));
+      } catch(e) {
+        console.log('not well formed json or object', e);
+        return;
+      }
+    } else {
+      return;
+    }
+    mqClient.publish(`msg/${host}/0/json`, json);
+  }
+  
+  events.sendJson = sendJson;
+
+  return events;
 
 }
 
