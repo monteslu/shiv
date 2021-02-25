@@ -1,6 +1,6 @@
 {
   "name": "shiv",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "client for shiv-server",
   "main": "index.js",
   "scripts": {
@@ -16,7 +16,10 @@
   "author": "Luis Montes",
   "license": "ISC",
   "dependencies": {
-    "mqtt": "^4.2.6"
+    "b64id": "^1.0.0",
+    "debug": "^4.3.1",
+    "mqtt": "^4.2.6",
+    "rawr": "^0.14.0"
   },
   "devDependencies": {
     "nodemon": "^2.0.7"

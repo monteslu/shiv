@@ -1,7 +1,15 @@
 const mqtt = require('mqtt');
 const net = require('net');
+const rawr = require('rawr');
+const b64id = require('b64id');
 const EventEmitter = require('events').EventEmitter;
+const debug = require('debug')('shiv:info');
+const debugVerbose = require('debug')('shiv:verbose');
+const debugError = require('debug')('shiv:error');
 
+debug.color = 3;
+debugVerbose.color = 2;
+debugError.color = 1;
 
 function createConnection(config) {
   const events = new EventEmitter();
@@ -12,20 +20,20 @@ function createConnection(config) {
     LOCAL_HOST,
     PORT,
     SHIV_BASE,
-    SHIV_PATH,
     SHIV_KEEP_ALIVE
   } = config;
 
   let lastConnect;
 
 
-  const connectURL = `${SHIV_SERVER}${SHIV_SERVER.endsWith('/') ? '' : '/'}${SHIV_BASE}${SHIV_PATH}`;
+  const connectURL = `${SHIV_SERVER}${SHIV_SERVER.endsWith('/') ? '' : '/'}${SHIV_BASE}`;
 
-  console.log('connecting to', connectURL, '…' );
+  debug('connecting to', connectURL, '…' );
 
   const username = (new URL(connectURL)).hostname;
 
   const mqClient  = mqtt.connect(connectURL, { password: SHIV_SECRET, username, keepalive: SHIV_KEEP_ALIVE });
+  mqClient.username = username;
 
   events.mqClient = mqClient;
 
@@ -33,13 +41,13 @@ function createConnection(config) {
 
   mqClient.on('connect', () => {
     const now = Date.now();
-    console.log('connected to', username, lastConnect ? (now - lastConnect) : '', lastConnect ? 'since last connect' : '');
+    debug('connected to', username, lastConnect ? (now - lastConnect) : '', lastConnect ? 'since last connect' : '');
     lastConnect = now;
     events.emit('connected', config);
   });
 
   mqClient.on('error', (error) => {
-    console.log('error on mqclient', username, error);
+    debugError('error on mqclient', username, error);
   });
 
   mqClient.on('message', (topic, message) => {
@@ -48,7 +56,7 @@ function createConnection(config) {
     }
     // message is Buffer
     const [name, hostName, socketId, action] = topic.split('/');
-    console.log('\n↓ MQTT' , topic);
+    debugVerbose('\n↓ MQTT' , topic);
     if (name === 'web') {
       if (socketId) {
         let socket = sockets[socketId];
@@ -64,34 +72,34 @@ function createConnection(config) {
           socket.socketId = socketId;
           sockets[socketId] = socket;
           socket.connect(PORT, LOCAL_HOST, () => {
-            console.log(`\nCONNECTED TO ${LOCAL_HOST}:${PORT}`, socket.socketId);
-            console.log('← ' + message.slice(0, 200).toString().split('\r\n')[0], message.length);
+            debugVerbose(`\nCONNECTED TO ${LOCAL_HOST}:${PORT}`, socket.socketId);
+            debugVerbose('← ' + message.slice(0, 200).toString().split('\r\n')[0], message.length);
             socket.write(message);
           });
           socket.on('data', (data) => {
             if (!socket.dataRecieved) {
               const logData = data.slice(0, 200).toString().split('\r\n')[0];
-              console.log(`↑ ${logData}${logData.length > 60 ? '…' : ''}`);//, data.toString());
+              debugVerbose(`↑ ${logData}${logData.length > 60 ? '…' : ''}`);
               socket.dataRecieved = true;
             } else {
-              console.log(`→ ${socket.socketId}`, data.length, '↑');
+              debugVerbose(`→ ${socket.socketId}`, data.length, '↑');
             }
             
             mqClient.publish(`reply/${username}/${socketId}`, data);
           });
           socket.on('close', () => {
-            console.log('close', username, socket.socketId);
+            debugVerbose('close', username, socket.socketId);
             mqClient.publish(`close/${username}/${socketId}`, '');
             delete sockets[socket.socketId];
           });
           socket.on('error', (err) => {
             delete sockets[socket.socketId];
-            console.log('error connecting', LOCAL_HOST, PORT, err);
+            debugError('error connecting', LOCAL_HOST, PORT, err);
           });
           return;
         }
 
-        console.log('←', socketId, message.length);
+        debugVerbose('←', socketId, message.length);
         socket.write(message);
       }
       
@@ -102,8 +110,11 @@ function createConnection(config) {
           msg.from = socketId;
           events.emit('json', msg);
         } catch (e) {
-          console.log('error parsing json message');
+          debugError('error parsing json message');
         }
+      } else if (action === 'ssrpc') {
+        const peer = getServerReplyPeer(socketId, mqClient);
+        peer.transport.receiveData(message.toString());
       }
     }
 
@@ -115,7 +126,7 @@ function createConnection(config) {
     }
 
     if (host === username) {
-      console.log('cannot send message to self', host);
+      debugError('cannot send message to self', host);
     }
 
     if (typeof json === 'object') {
@@ -124,7 +135,7 @@ function createConnection(config) {
       try {
         json = JSON.stringify(JSON.parse(json));
       } catch(e) {
-        console.log('not well formed json or object', e);
+        debugError('not well formed json or object', e);
         return;
       }
     } else {
@@ -141,7 +152,7 @@ function createConnection(config) {
         delete sockets[sk];
       }
       catch(e) {
-        console.log('error closing socket', e);
+        debugError('error closing socket', e);
       }
     });
   }
@@ -159,9 +170,41 @@ function createConnection(config) {
       }
     })
   }
+
+  function ping(greeting) {
+    return greeting + ' back atcha from client ' + Date.now();
+  }
+
+  const serverReplyMethods = {
+    ping,
+  };
+
+  function getServerReplyPeer(requestId, client) {
+
+    const transport = new EventEmitter();
+    transport.send = (msg) => {
+      if(typeof msg === 'object') {
+        msg = JSON.stringify(msg);
+      }
+      const topic = `ssrpc/${client.username}/${requestId}`;
+      debugVerbose('↑ server rpc reply', msg);
+      client.publish(topic, Buffer.from(msg));
+    };
+    transport.receiveData = (msg) => {
+      debugVerbose('↓ server rpc', msg);
+      if(msg) {
+        msg = JSON.parse(msg);
+      }
+      transport.emit('rpc', msg);
+    };
+
+    const peer = rawr({transport, methods: serverReplyMethods});
+    return peer;
+  }
   
   events.sendJson = sendJson;
   events.endClient = endClient;
+  events.serverReplyMethods = serverReplyMethods;
 
   return events;
 
